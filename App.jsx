@@ -1,7 +1,9 @@
-```react
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Volume2, Languages, RotateCcw, CheckCircle, Star, Sparkles, ChevronRight, Palette } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Volume2, Languages, RotateCcw, Star, ChevronRight, Palette } from 'lucide-react';
 
+/**
+ * 靜態資料定義
+ */
 const LEVELS = [
   { 
     id: 1, 
@@ -9,7 +11,6 @@ const LEVELS = [
     targetColor: '#FF3D00', 
     colorName: { zh: '紅色', en: 'Red' },
     objectName: { zh: '草莓', en: 'Strawberry' },
-    // 精緻的草莓路徑
     path: "M100,50 C80,50 40,70 40,120 C40,170 100,195 100,195 C100,195 160,170 160,120 C160,70 120,50 100,50 Z",
     details: (
       <g fill="none" stroke="#2D3436" strokeWidth="2">
@@ -75,6 +76,24 @@ const COLORS = [
   { zh: '紫色', en: 'Purple', code: '#9C27B0' },
 ];
 
+/**
+ * 碎紙特效組件
+ */
+const Confetti = () => {
+  return Array.from({ length: 20 }).map((_, i) => (
+    <div 
+      key={i}
+      className="absolute w-2 h-2 rounded-sm animate-confetti"
+      style={{
+        backgroundColor: ['#FF3D00', '#FFD600', '#4CAF50', '#2196F3', '#FF9800'][i % 5],
+        left: `${Math.random() * 100}%`,
+        top: `-20px`,
+        animationDelay: `${Math.random() * 2}s`
+      }}
+    />
+  ));
+};
+
 const App = () => {
   const [levelIdx, setLevelIdx] = useState(0);
   const [lang, setLang] = useState('zh');
@@ -84,7 +103,7 @@ const App = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   
   const canvasRef = useRef(null);
-  const maskCanvasRef = useRef(null); // 用於計算總面積的隱藏畫布
+  const maskCanvasRef = useRef(null);
   const ctxRef = useRef(null);
   const currentLevel = LEVELS[levelIdx];
 
@@ -101,7 +120,7 @@ const App = () => {
 
   const speakBilingual = (zh, en) => {
     speak(zh, 'zh');
-    setTimeout(() => speak(en, 'en'), 1000);
+    setTimeout(() => speak(en, 'en'), 1200);
   };
 
   // 初始化關卡
@@ -118,23 +137,25 @@ const App = () => {
     setCoverage(0);
     setIsCompleted(false);
 
-    // 準備隱藏畫布來計算「應塗色總面積」
+    // 準備隱藏畫布計算面積
     const mCanvas = maskCanvasRef.current;
     const mCtx = mCanvas.getContext('2d', { willReadFrequently: true });
     mCtx.clearRect(0, 0, mCanvas.width, mCanvas.height);
     const path = new Path2D(currentLevel.path);
-    mCtx.fill(path); // 填滿黑色
+    mCtx.fill(path);
 
     speakBilingual(
       `請把${currentLevel.objectName.zh}塗上${currentLevel.colorName.zh}`,
       `Color the ${currentLevel.objectName.en} ${currentLevel.colorName.en}`
     );
-  }, [levelIdx]);
+  }, [levelIdx, currentLevel]);
 
-  // 進度計算邏輯 (80% 門檻)
+  // 進度計算 (80% 門檻)
   const calculateCoverage = () => {
     const canvas = canvasRef.current;
     const mCanvas = maskCanvasRef.current;
+    if (!canvas || !mCanvas) return;
+
     const ctx = canvas.getContext('2d');
     const mCtx = mCanvas.getContext('2d');
 
@@ -145,10 +166,10 @@ const App = () => {
     let coloredShapePixels = 0;
 
     for (let i = 0; i < maskData.length; i += 4) {
-      const isInsideShape = maskData[i + 3] > 0; // 隱藏畫布中有畫到的部分
+      const isInsideShape = maskData[i + 3] > 0;
       if (isInsideShape) {
         totalShapePixels++;
-        if (drawData[i + 3] > 50) { // 使用者有塗色的部分 (Alpha > 50)
+        if (drawData[i + 3] > 50) {
           coloredShapePixels++;
         }
       }
@@ -163,101 +184,116 @@ const App = () => {
     }
   };
 
+  const getCoordinates = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    
+    // 考慮到 Canvas 實際尺寸與顯示尺寸的比例
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    return {
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY
+    };
+  };
+
   const handleStart = (e) => {
-    if (isCompleted || !selectedColor) {
-      if (!selectedColor) speakBilingual("請先選擇顏色", "Please pick a color");
+    if (isCompleted) return;
+    if (!selectedColor) {
+      speakBilingual("請先選擇顏色", "Please pick a color");
       return;
     }
     if (selectedColor.code !== currentLevel.targetColor) {
       speakBilingual(`這不是${currentLevel.colorName.zh}`, `That's not ${currentLevel.colorName.en}`);
       return;
     }
+
     setIsDrawing(true);
-    handleDraw(e);
+    const { x, y } = getCoordinates(e);
+    const ctx = ctxRef.current;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
   };
 
   const handleDraw = (e) => {
     if (!isDrawing || !ctxRef.current) return;
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX || e.touches[0].clientX) - rect.left;
-    const y = (e.clientY || e.touches[0].clientY) - rect.top;
-
+    
+    const { x, y } = getCoordinates(e);
     const ctx = ctxRef.current;
-    // 使用遮罩：只在圖案路徑內繪畫
+
     ctx.save();
     const path = new Path2D(currentLevel.path);
     ctx.clip(path);
     
-    ctx.globalAlpha = 0.4;
-    ctx.lineWidth = 45;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 30;
     ctx.strokeStyle = selectedColor.code;
     
     ctx.lineTo(x, y);
     ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(x, y);
     ctx.restore();
   };
 
   const handleEnd = () => {
+    if (!isDrawing) return;
     setIsDrawing(false);
-    ctxRef.current.beginPath();
     calculateCoverage();
   };
 
   return (
     <div className="min-h-screen bg-[#FFFBEB] flex flex-col items-center p-4 font-sans select-none touch-none">
-      {/* 隱藏的計算用畫布 */}
       <canvas ref={maskCanvasRef} width={200} height={200} className="hidden" />
 
-      {/* 頂部標題 */}
+      {/* 頁首 */}
       <header className="w-full max-w-2xl flex justify-between items-center mb-4">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 bg-orange-400 rounded-2xl flex items-center justify-center shadow-lg">
-            <Palette className="text-white" />
+          <div className="w-10 h-10 bg-orange-400 rounded-xl flex items-center justify-center shadow-lg">
+            <Palette className="text-white" size={24} />
           </div>
           <div>
-            <h1 className="text-xl font-black text-gray-800">{lang === 'zh' ? '雙語著色大師' : 'Bilingual Coloring'}</h1>
-            <div className="text-xs font-bold text-orange-500 uppercase tracking-widest">Toddler Edition</div>
+            <h1 className="text-lg font-black text-gray-800">{lang === 'zh' ? '雙語著色大師' : 'Coloring Master'}</h1>
+            <div className="text-[10px] font-bold text-orange-500 uppercase tracking-widest">Toddler App</div>
           </div>
         </div>
         <button 
           onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
-          className="bg-white border-2 border-orange-200 px-4 py-2 rounded-full font-bold text-gray-700 shadow-sm flex items-center gap-2 hover:bg-orange-50 active:scale-95 transition-all"
+          className="bg-white border-2 border-orange-200 px-4 py-1.5 rounded-full font-bold text-gray-700 shadow-sm flex items-center gap-2 hover:bg-orange-50 active:scale-95 transition-all"
         >
-          <Languages size={18} /> {lang === 'zh' ? 'English' : '中文'}
+          <Languages size={16} /> {lang === 'zh' ? 'English' : '中文'}
         </button>
       </header>
 
-      {/* 任務指令 */}
-      <div className="text-center mb-4">
-        <div className="inline-block bg-white px-6 py-2 rounded-full shadow-md mb-2">
-            <h2 className="text-2xl md:text-3xl font-black text-gray-800 flex items-center gap-3">
+      {/* 指令區 */}
+      <div className="text-center mb-6">
+        <div className="inline-flex items-center bg-white px-6 py-2 rounded-full shadow-md mb-3 gap-3">
+            <h2 className="text-xl md:text-2xl font-black text-gray-800">
                 {lang === 'zh' ? `請塗上 ${currentLevel.colorName.zh}` : `Color it ${currentLevel.colorName.en}`}
-                <button onClick={() => speakBilingual(currentLevel.colorName.zh, currentLevel.colorName.en)} className="text-orange-400"><Volume2 /></button>
             </h2>
+            <button onClick={() => speakBilingual(currentLevel.colorName.zh, currentLevel.colorName.en)} className="text-orange-400 hover:scale-110 transition-transform">
+              <Volume2 size={24} />
+            </button>
         </div>
-        <div className="flex items-center justify-center gap-2 text-gray-500 font-bold">
-           <span>{lang === 'zh' ? '進度：' : 'Progress:'}</span>
-           <div className="w-32 h-3 bg-gray-200 rounded-full overflow-hidden">
-              <div className="h-full bg-green-400 transition-all duration-300" style={{ width: `${(coverage / 80) * 100}%` }} />
+        
+        <div className="flex items-center justify-center gap-3 text-gray-500 font-bold">
+           <span className="text-sm">{lang === 'zh' ? '進度' : 'Progress'}</span>
+           <div className="w-40 h-3 bg-gray-200 rounded-full overflow-hidden border border-gray-300">
+              <div className="h-full bg-green-400 transition-all duration-300" style={{ width: `${Math.min(100, (coverage / 80) * 100)}%` }} />
            </div>
-           <span className={`${coverage >= 80 ? 'text-green-500' : ''}`}>{Math.min(100, Math.round((coverage / 80) * 100))}%</span>
+           <span className={`text-sm ${coverage >= 80 ? 'text-green-500' : ''}`}>{Math.min(100, Math.round((coverage / 80) * 100))}%</span>
         </div>
       </div>
 
-      {/* 畫布區 */}
-      <div className="relative w-full max-w-md aspect-square bg-white rounded-[50px] shadow-2xl border-[12px] border-white overflow-hidden mb-6">
-        {/* 背景格線 */}
-        <div className="absolute inset-0 pointer-events-none opacity-[0.05]" style={{ backgroundImage: 'linear-gradient(#000 1.5px, transparent 1.5px), linear-gradient(90deg, #000 1.5px, transparent 1.5px)', backgroundSize: '30px 30px' }} />
+      {/* 畫布 */}
+      <div className="relative w-full max-w-md aspect-square bg-white rounded-[40px] shadow-2xl border-[10px] border-white overflow-hidden mb-8">
+        <div className="absolute inset-0 pointer-events-none opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(#000 1.5px, transparent 1.5px), linear-gradient(90deg, #000 1.5px, transparent 1.5px)', backgroundSize: '25px 25px' }} />
 
-        {/* 1. 底層精緻圖案 */}
         <svg viewBox="0 0 200 200" className="absolute inset-0 w-full h-full p-8 pointer-events-none">
-          <path d={currentLevel.path} fill="#F3F4F6" stroke="#E5E7EB" strokeWidth="2" />
+          <path d={currentLevel.path} fill="#F9FAFB" stroke="#F3F4F6" strokeWidth="1" />
         </svg>
 
-        {/* 2. 畫布層 */}
         <canvas
           ref={canvasRef}
           width={200}
@@ -273,30 +309,29 @@ const App = () => {
           style={{ touchAction: 'none' }}
         />
 
-        {/* 3. 頂層線條細節 (確保線條蓋在顏色上) */}
         <svg viewBox="0 0 200 200" className="absolute inset-0 w-full h-full p-8 pointer-events-none z-20">
           <path d={currentLevel.path} fill="none" stroke="#2D3436" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
           {currentLevel.details}
         </svg>
 
-        {/* 過關特效 */}
+        {/* 過關彈窗 */}
         {isCompleted && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/60 backdrop-blur-sm animate-fade-in">
-            <div className="bg-white p-8 rounded-[40px] shadow-2xl border-4 border-green-400 flex flex-col items-center animate-pop-in">
+          <div className="absolute inset-0 z-30 flex items-center justify-center bg-white/70 backdrop-blur-sm animate-fade-in">
+            <div className="bg-white p-6 rounded-[32px] shadow-2xl border-4 border-green-400 flex flex-col items-center animate-pop-in">
               <div className="flex gap-1 mb-2">
-                 {[1,2,3].map(i => <Star key={i} size={32} className="text-yellow-400 fill-yellow-400" />)}
+                 {[1,2,3].map(i => <Star key={i} size={28} className="text-yellow-400 fill-yellow-400" />)}
               </div>
-              <p className="text-2xl font-black text-green-600">
+              <p className="text-xl font-black text-green-600 mb-1">
                 {lang === 'zh' ? '太棒了！' : 'EXCELLENT!'}
               </p>
-              <p className="text-gray-600 font-bold mb-4">
-                {lang === 'zh' ? `這就是${currentLevel.objectName.zh}` : `This is a ${currentLevel.objectName.en}`}
+              <p className="text-sm text-gray-600 font-bold mb-5 text-center">
+                {lang === 'zh' ? `這是一個${currentLevel.colorName.zh}${currentLevel.objectName.zh}` : `This is a ${currentLevel.colorName.en} ${currentLevel.objectName.en}`}
               </p>
               <button 
                 onClick={() => setLevelIdx((prev) => (prev + 1) % LEVELS.length)}
-                className="bg-green-500 text-white px-8 py-3 rounded-2xl font-black shadow-lg hover:bg-green-600 active:scale-95 transition-all flex items-center gap-2"
+                className="bg-green-500 text-white px-10 py-3 rounded-2xl font-black shadow-lg hover:bg-green-600 active:scale-95 transition-all flex items-center gap-2"
               >
-                {lang === 'zh' ? '下一關' : 'Next'} <ChevronRight />
+                {lang === 'zh' ? '下一關' : 'Next Level'} <ChevronRight size={20} />
               </button>
             </div>
             <Confetti />
@@ -304,9 +339,9 @@ const App = () => {
         )}
       </div>
 
-      {/* 色票區域 (著色筆造型) */}
-      <div className="w-full max-w-lg bg-white/90 backdrop-blur-md p-6 rounded-[40px] shadow-xl">
-        <div className="grid grid-cols-4 md:grid-cols-7 gap-4">
+      {/* 色票區 */}
+      <div className="w-full max-w-lg bg-white/80 backdrop-blur-md p-6 rounded-[35px] shadow-xl border border-white">
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-4">
           {COLORS.map((color) => (
             <button
               key={color.code}
@@ -315,18 +350,18 @@ const App = () => {
                 speakBilingual(color.zh, color.en);
               }}
               className={`flex flex-col items-center transition-all duration-300 ${
-                selectedColor?.code === color.code ? 'scale-110 -translate-y-4' : 'hover:scale-105 opacity-80'
+                selectedColor?.code === color.code ? 'scale-110 -translate-y-3' : 'hover:scale-105 opacity-70'
               }`}
             >
               <div 
-                className={`w-10 h-20 rounded-t-lg rounded-b-2xl shadow-md border-4 ${
+                className={`w-10 h-16 rounded-t-lg rounded-b-xl shadow-inner border-4 ${
                     selectedColor?.code === color.code ? 'border-orange-300' : 'border-white'
                 }`}
                 style={{ backgroundColor: color.code }}
               >
-                <div className="w-full h-8 bg-black/10 mt-6" />
+                <div className="w-full h-6 bg-black/5 mt-4" />
               </div>
-              <span className="text-[10px] font-bold text-gray-500 mt-1 uppercase tracking-tighter">
+              <span className="text-[10px] font-black text-gray-500 mt-2">
                 {lang === 'zh' ? color.zh : color.en}
               </span>
             </button>
@@ -339,12 +374,12 @@ const App = () => {
                 setCoverage(0);
                 setIsCompleted(false);
             }}
-            className="flex flex-col items-center justify-center p-2 text-gray-300 hover:text-orange-400"
+            className="flex flex-col items-center justify-center p-2 text-gray-400 hover:text-orange-500 transition-colors"
           >
-            <div className="w-10 h-20 border-4 border-dashed border-gray-200 rounded-2xl flex items-center justify-center">
-                <RotateCcw size={20} />
+            <div className="w-10 h-16 border-2 border-dashed border-gray-300 rounded-xl flex items-center justify-center mb-2">
+                <RotateCcw size={18} />
             </div>
-            <span className="text-[10px] font-bold mt-1">RESET</span>
+            <span className="text-[10px] font-bold">RESET</span>
           </button>
         </div>
       </div>
@@ -364,21 +399,4 @@ const App = () => {
   );
 };
 
-const Confetti = () => {
-  return Array.from({ length: 20 }).map((_, i) => (
-    <div 
-      key={i}
-      className="absolute w-2 h-2 rounded-sm animate-confetti"
-      style={{
-        backgroundColor: ['#FF3D00', '#FFD600', '#4CAF50', '#2196F3', '#FF9800'][i % 5],
-        left: `${Math.random() * 100}%`,
-        top: `-20px`,
-        animationDelay: `${Math.random() * 2}s`
-      }}
-    />
-  ));
-};
-
 export default App;
-
-```
